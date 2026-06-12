@@ -65,6 +65,11 @@ if __name__ == "__main__":
         color=(255,255,255,255)
     )
 
+    game_shaders = os.path.join(os.path.dirname(__file__), "game_shaders")
+    pipeline = init_pipeline(game_shaders + "/blinn_phong.vert", game_shaders + "/blinn_phong.frag")
+
+    assets_folder = os.path.join(os.path.dirname(__file__), "assets")
+
     cam = MyCam([5,5,5])
 
     world = SceneGraph(cam)
