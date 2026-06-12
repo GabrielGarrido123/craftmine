@@ -30,6 +30,7 @@ class Controller(Window):
 
         self.wireframe = False
         self.mouseLocked = True
+        self.debug = False
 
 class MyCam(FreeCamera):
     #hereda caracteristicas de utils.camera.FreeCamera
@@ -52,6 +53,18 @@ if __name__ == "__main__":
     controller = Controller(800,600, "CraftMine")
     controller.set_exclusive_mouse(controller.mouseLocked)
 
+    #Contador de FPS para el Debug. Sacado de Aux10 del repo de auxiliares del curso
+    fps_label = text.Label(
+        text="FPS: 0.00",
+        font_name="Arial",
+        font_size=16,
+        x=controller.width - 10,
+        y=controller.height - 10,
+        anchor_x="right",
+        anchor_y="top",
+        color=(255,255,255,255)
+    )
+
     cam = MyCam([5,5,5])
 
     world = SceneGraph(cam)
@@ -69,6 +82,10 @@ if __name__ == "__main__":
             glPolygonMode(GL_FRONT_AND_BACK, GL_LINE)
         
         world.draw()
+        glDisable(GL_DEPTH_TEST)
+
+        if controller.debug:
+            fps_label.draw()
     
     @controller.event
     def on_key_press(symbol, modifiers):
@@ -76,12 +93,20 @@ if __name__ == "__main__":
             #Accion para poder recuperar el mouse y que no este anclado al programa (sin tener que cerrarlo o apretar la tecla Super para esto)
             controller.mouseLocked = not controller.mouseLocked
             controller.set_exclusive_mouse(controller.mouseLocked)
+        
+        if symbol == key.F3:
+            #Activa/Desactiva el Debug
+            controller.debug = not controller.debug
 
     def update(dt):
         world.update()
         cam.time_update(dt)
 
         controller.time += dt
-    
+
+        if controller.debug:
+            fps = 1/dt if dt>0 else 0
+            fps_label.text = f"FPS {fps:.2f}"
+
     clock.schedule_interval(update, 1/60)
     run()
