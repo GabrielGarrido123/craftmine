@@ -33,7 +33,7 @@ class Controller(Window):
         self.debug = False
 
         self.skyColor = np.array([0.2,0.55,0.85])
-        self.WORLD_SIZE = 4
+        self.WORLD_SIZE = 8
 
 class MyCam(FreeCamera):
     #hereda caracteristicas de utils.camera.FreeCamera
@@ -166,7 +166,7 @@ if __name__ == "__main__":
     assets_folder = os.path.join(os.path.dirname(__file__), "assets")
     atlas = Texture(assets_folder + "/atlas.png", minFilterMode=GL_NEAREST, maxFilterMode=GL_NEAREST)
 
-    cam = MyCam([5,5,5])
+    cam = MyCam([0,5,0])
 
     world = SceneGraph(cam)
 
@@ -174,7 +174,8 @@ if __name__ == "__main__":
     chunks=[]
     for z in range(controller.WORLD_SIZE):
         for x in range(controller.WORLD_SIZE):
-            chunks.append(Chunk((x,z),atlas))
+            (posX,posZ) = (x-controller.WORLD_SIZE//2,z-controller.WORLD_SIZE//2)
+            chunks.append(Chunk((posX,posZ),atlas))
     
     for c in chunks:
         for z in range(Chunk.COUNT):
@@ -188,10 +189,8 @@ if __name__ == "__main__":
             pipeline=pipeline,
             material=DEFAULT_MATERIALS["basic"],
             texture=c.atlas,
-            position=[c.id[0],0,c.id[1]]
+            position=[c.id[0]*Chunk.SIZE,0,c.id[1]*Chunk.SIZE]
             )
-    
-
 
     world.add_node("sun", light=DirectionalLight(ambient=[0.2,0.2,0.2]), pipeline=pipeline, rotation=[-np.pi/4, -np.pi/4, 0])
 
