@@ -130,6 +130,30 @@ class Chunk(Model):
         #se ejecuta el resto de la funcion init_gpu_data() de Model
         super().init_gpu_data(pipeline)
 
+def mundo_plano_clasico(size):
+    #Esto genera una plataforma sencilla de bloques
+    chunks=[]
+    for z in range(size):
+        for x in range(size):
+            (posX,posZ) = (x-size//2,z-size//2)
+            chunks.append(Chunk((posX,posZ),atlas))
+    
+    for c in chunks:
+        for z in range(Chunk.COUNT):
+            for x in range(Chunk.COUNT):
+                c.blocks[0][z][x] = Block("grass")
+        
+        #agregamos el chunk al grafo de escena
+        world.add_node(
+            name=f"chunk{c.id[0]},{c.id[1]}",
+            mesh=c,
+            pipeline=pipeline,
+            material=DEFAULT_MATERIALS["basic"],
+            texture=c.atlas,
+            position=[c.id[0]*Chunk.SIZE,0,c.id[1]*Chunk.SIZE]
+            )
+
+
 
 if __name__ == "__main__":
     #Crear la ventana
@@ -169,28 +193,8 @@ if __name__ == "__main__":
     cam = MyCam([0,5,0])
 
     world = SceneGraph(cam)
-
     #GENERACION DE MUNDO
-    chunks=[]
-    for z in range(controller.WORLD_SIZE):
-        for x in range(controller.WORLD_SIZE):
-            (posX,posZ) = (x-controller.WORLD_SIZE//2,z-controller.WORLD_SIZE//2)
-            chunks.append(Chunk((posX,posZ),atlas))
-    
-    for c in chunks:
-        for z in range(Chunk.COUNT):
-            for x in range(Chunk.COUNT):
-                c.blocks[0][z][x] = Block("grass")
-        
-        #agregamos el chunk al grafo de escena
-        world.add_node(
-            name=f"chunk{c.id[0]},{c.id[1]}",
-            mesh=c,
-            pipeline=pipeline,
-            material=DEFAULT_MATERIALS["basic"],
-            texture=c.atlas,
-            position=[c.id[0]*Chunk.SIZE,0,c.id[1]*Chunk.SIZE]
-            )
+    mundo_plano_clasico(controller.WORLD_SIZE)
 
     world.add_node("sun", light=DirectionalLight(ambient=[0.2,0.2,0.2]), pipeline=pipeline, rotation=[-np.pi/4, -np.pi/4, 0])
 
