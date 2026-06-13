@@ -32,6 +32,8 @@ class Controller(Window):
         self.mouseLocked = True
         self.debug = False
 
+        self.skyColor = np.array([0.2,0.55,0.85])
+
 class MyCam(FreeCamera):
     #hereda caracteristicas de utils.camera.FreeCamera
     def __init__(self, position=np.array([0,0,0]), camera_type="perspective", direction=np.array([0,0,0]), speed=2):
@@ -48,7 +50,8 @@ class MyCam(FreeCamera):
         self.position += dir*self.speed*dt
         self.focus = self.position + self.forward
 
-def get_atlas_uv(xoff, yoff, atlas, resolution=16):
+def get_atlas_uv(offsets, atlas, resolution=16):
+    (xoff, yoff) = offsets
     dx = resolution / atlas.width
     dy = resolution / atlas.height
     return [
@@ -57,6 +60,11 @@ def get_atlas_uv(xoff, yoff, atlas, resolution=16):
         dx*(xoff+1)     ,dy*(yoff+1),
         dx*xoff         ,dy*(yoff+1)
     ]
+
+DEFAULT_MATERIALS = {
+    "basic": Material(specular=[0.4,0.4,0.4]),
+    "metal": Material(shininess=64)
+}
 
 BLOCKS_UV = {
     "air": [],
@@ -68,6 +76,7 @@ class Block:
         self.id = id
         self.position = np.zeros(3)
         self.texture_id = texture_id
+
 
 if __name__ == "__main__":
     #Crear la ventana
@@ -86,6 +95,18 @@ if __name__ == "__main__":
         color=(255,255,255,255)
     )
 
+    #Para mostrar la posicion en el espacio. Tambien es del Debug
+    pos_label = text.Label(
+        text="XYZ: 0.00, 0.00, 0.00",
+        font_name="Arial",
+        font_size=16,
+        x=10,
+        y=controller.height - 10,
+        anchor_x="left",
+        anchor_y="top",
+        color=(255,255,255,255)
+    )
+
     game_shaders = os.path.join(os.path.dirname(__file__), "game_shaders")
     pipeline = init_pipeline(game_shaders + "/blinn_phong.vert", game_shaders + "/blinn_phong.frag")
 
@@ -97,17 +118,21 @@ if __name__ == "__main__":
     world = SceneGraph(cam)
 
     grass = [
-        *get_atlas_uv(23,23,atlas),
-        *get_atlas_uv(23,23,atlas),
-        *get_atlas_uv(23,23,atlas),
-        *get_atlas_uv(23,23,atlas),
-        *get_atlas_uv(23,23,atlas),
-        *get_atlas_uv(23,23,atlas)
+        *get_atlas_uv(BLOCKS_UV["grass"][0] ,atlas),
+        *get_atlas_uv(BLOCKS_UV["grass"][1],atlas),
+        *get_atlas_uv(BLOCKS_UV["grass"][2],atlas),
+        *get_atlas_uv(BLOCKS_UV["grass"][3],atlas),
+        *get_atlas_uv(BLOCKS_UV["grass"][4],atlas),
+        *get_atlas_uv(BLOCKS_UV["grass"][5],atlas)
     ]
 
     block_mesh = Model(shapes.Cube["position"], grass, index_data=shapes.Cube["indices"], normal_data=shapes.Cube["normal"])
 
-    world.add_node("grass", mesh= block_mesh, texture=atlas, pipeline=pipeline, material=Material())
+    for x in range(10):
+        for z in range(10):
+            name = f"block{x},{z}"
+            world.add_node(name, mesh = block_mesh, texture = atlas, pipeline = pipeline, material = DEFAULT_MATERIALS["basic"])
+            world[name]["position"] = [x, 0, z]
 
     world.add_node("sun", light=DirectionalLight(ambient=[0.2,0.2,0.2]), pipeline=pipeline, rotation=[-np.pi/4, -np.pi/4, 0])
 
@@ -115,7 +140,7 @@ if __name__ == "__main__":
     def on_draw():
         controller.clear()
 
-        glClearColor(0.2,0.2,0.2,1)
+        glClearColor(*controller.skyColor,1)
         glEnable(GL_DEPTH_TEST)
 
         if controller.wireframe:
@@ -126,8 +151,11 @@ if __name__ == "__main__":
         world.draw()
         glDisable(GL_DEPTH_TEST)
 
+        #Renderizar UI
+        glPolygonMode(GL_FRONT_AND_BACK, GL_FILL)
         if controller.debug:
             fps_label.draw()
+            pos_label.draw()
     
     @controller.event
     def on_key_press(symbol, modifiers):
@@ -139,6 +167,10 @@ if __name__ == "__main__":
         if symbol == key.F3:
             #Activa/Desactiva el Debug
             controller.debug = not controller.debug
+
+        if symbol == key.F5:
+            #Activa/desactiva el Wireframe
+            controller.wireframe = not controller.wireframe
         
         if symbol == key.W:
             cam.direction[0] = 1
@@ -170,7 +202,10 @@ if __name__ == "__main__":
 
         if controller.debug:
             fps = 1/dt if dt>0 else 0
-            fps_label.text = f"FPS {fps:.2f}"
+            fps_label.text = f"FPS: {fps:.2f}"
 
-    clock.schedule_interval(update, 1/60)
+            pos = cam.position
+            pos_label.text = f"XYZ: {pos[0]:.1f}, {pos[1]:.1f}, {pos[2]:.1f}"
+
+    clock.schedule_interval(update, 1/600)
     run()
