@@ -33,6 +33,7 @@ class Controller(Window):
         self.debug = False
 
         self.skyColor = np.array([0.2,0.55,0.85])
+        self.WORLD_SIZE = 4
 
 class MyCam(FreeCamera):
     #hereda caracteristicas de utils.camera.FreeCamera
@@ -72,10 +73,62 @@ BLOCKS_UV = {
 }
 
 class Block:
-    def __init__(self, id,  texture_id="grass") -> None:
+    def __init__(self, id="air") -> None:
         self.id = id
         self.position = np.zeros(3)
-        self.texture_id = texture_id
+
+class Chunk(Model):
+    #La idea de crear una clase chunk, al igual que en el aux 10, es crear meshes que agrupen varios bloques, para asi optimizar el renderizado.
+    #Esto significa que los chunks deben heredar metodos de utils.drawables.Model
+    #Codigo sacado de aux 10, con leves modificaciones
+
+    #tamaño del chunk, por cada eje
+    COUNT = 16
+    SIZE = 16
+    def __init__(self, id, atlas):
+        super().__init__([],[],[],[]) #informacion que se le da a Model
+        self.index_data = []
+        self.blocks = np.full((Chunk.COUNT, Chunk.COUNT, Chunk.COUNT), None, dtype=object) #forma, dato con el que rellenar, tipo de dato
+
+        for y in range(Chunk.COUNT):
+            for z in range(Chunk.COUNT):
+                for x in range(Chunk.COUNT):
+                    self.blocks[y][z][x] = Block("air") #rellenamos la matriz de bloques con aire (bloque invisible)
+        
+        self.atlas = atlas
+        self.id = id
+    
+    #la clase (Chunk) modifica la funcion init_gpu_data de Model
+    def init_gpu_data(self, pipeline):
+        delta = Chunk.SIZE / Chunk.COUNT
+        cube_pos = [(coord + 0.5)*delta for coord in shapes.Cube["position"]]
+        cube_pos = np.reshape(cube_pos, (len(cube_pos) // 3, 3))
+        deltaV = cube_pos.shape[0]
+        vcount = 0
+
+        #armado del mesh. Al modelo se le añaden los vertices de cada bloque del chunk (que si sea renderizado)
+        for y in range(Chunk.COUNT):
+            for z in range(Chunk.COUNT):
+                for x in range(Chunk.COUNT):
+                    block = self.blocks[y][z][x]
+                    block.position = np.array([x * delta, y * delta, z * delta])
+
+                    if block.id == "air":
+                        #se skippea el bloque de aire, o bloque vacio.
+                        continue
+                    
+                    for p in cube_pos:
+                        self.position_data.extend(p + block.position)
+                    
+                    for uv in BLOCKS_UV[block.id]:
+                        self.uv_data.extend(get_atlas_uv(uv, self.atlas))
+                    
+                    self.normal_data.extend(shapes.Cube["normal"])
+                    self.index_data.extend([vcount + i for i in shapes.Cube["indices"]])
+                    vcount += deltaV
+        
+        #se ejecuta el resto de la funcion init_gpu_data() de Model
+        super().init_gpu_data(pipeline)
 
 
 if __name__ == "__main__":
@@ -117,22 +170,28 @@ if __name__ == "__main__":
 
     world = SceneGraph(cam)
 
-    grass = [
-        *get_atlas_uv(BLOCKS_UV["grass"][0] ,atlas),
-        *get_atlas_uv(BLOCKS_UV["grass"][1],atlas),
-        *get_atlas_uv(BLOCKS_UV["grass"][2],atlas),
-        *get_atlas_uv(BLOCKS_UV["grass"][3],atlas),
-        *get_atlas_uv(BLOCKS_UV["grass"][4],atlas),
-        *get_atlas_uv(BLOCKS_UV["grass"][5],atlas)
-    ]
+    #GENERACION DE MUNDO
+    chunks=[]
+    for z in range(controller.WORLD_SIZE):
+        for x in range(controller.WORLD_SIZE):
+            chunks.append(Chunk((x,z),atlas))
+    
+    for c in chunks:
+        for z in range(Chunk.COUNT):
+            for x in range(Chunk.COUNT):
+                c.blocks[0][z][x] = Block("grass")
+        
+        #agregamos el chunk al grafo de escena
+        world.add_node(
+            name=f"chunk{c.id[0]},{c.id[1]}",
+            mesh=c,
+            pipeline=pipeline,
+            material=DEFAULT_MATERIALS["basic"],
+            texture=c.atlas,
+            position=[c.id[0],0,c.id[1]]
+            )
+    
 
-    block_mesh = Model(shapes.Cube["position"], grass, index_data=shapes.Cube["indices"], normal_data=shapes.Cube["normal"])
-
-    for x in range(10):
-        for z in range(10):
-            name = f"block{x},{z}"
-            world.add_node(name, mesh = block_mesh, texture = atlas, pipeline = pipeline, material = DEFAULT_MATERIALS["basic"])
-            world[name]["position"] = [x, 0, z]
 
     world.add_node("sun", light=DirectionalLight(ambient=[0.2,0.2,0.2]), pipeline=pipeline, rotation=[-np.pi/4, -np.pi/4, 0])
 
