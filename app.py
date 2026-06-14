@@ -21,6 +21,8 @@ from utils.scene_graph import SceneGraph
 from utils.drawables import Texture, Model, DirectionalLight, Material
 from utils import shapes
 
+from utils import colliders
+
 class Controller(Window):
     #hereda caracteristicas de pyglet.window.Window
     def __init__(self, *args, **kwargs) -> None:
@@ -33,22 +35,33 @@ class Controller(Window):
         self.debug = False
 
         self.skyColor = np.array([0.2,0.55,0.85])
-        self.WORLD_SIZE = 8
+        self.WORLD_SIZE = 4
 
-class MyCam(FreeCamera):
+class Player(FreeCamera):
+    #clase del jugador. El jugador sera básicamente una camara, asi que\
     #hereda caracteristicas de utils.camera.FreeCamera
-    def __init__(self, position=np.array([0,0,0]), camera_type="perspective", direction=np.array([0,0,0]), speed=2):
+    def __init__(self, position=np.zeros(3), camera_type="perspective", direction=np.zeros(3), speed=2):
         super().__init__(position, camera_type)
         self.direction = direction
         self.speed = speed
+        self.velocity = np.zeros(3)
+
+        self.collider = colliders.AABB("player", [-0.4, -0.4, -0.4], [0.4, 0.4, 0.4])
     
-    def time_update(self,dt):
+    def player_update(self,dt):
         self.update() #metodo update() heredado de FreeCamera
         dir = self.direction[0]*self.forward + self.direction[1]*self.right
         dir_norm = np.linalg.norm(dir)
         if dir_norm:
             dir /= dir_norm
-        self.position += dir*self.speed*dt
+        
+        #Fisicas del jugador
+        self.velocity += dir*self.speed
+        self.position += self.velocity*dt
+
+        self.collider.set_position(self.position)
+        self.velocity = np.zeros(3)
+
         self.focus = self.position + self.forward
 
 def get_atlas_uv(offsets, atlas, resolution=16):
@@ -69,7 +82,8 @@ DEFAULT_MATERIALS = {
 
 BLOCKS_UV = {
     "air": [],
-    "grass": [(27, 20), (27, 20), (27, 20), (27, 20), (28, 18), (23, 23)]
+    "grass": [(27, 20), (27, 20), (27, 20), (27, 20), (28, 18), (23, 23)],
+    "cobblestone": [(2,16),(2,16),(2,16),(2,16),(2,16),(2,16)]
 }
 
 class Block:
@@ -130,30 +144,13 @@ class Chunk(Model):
         #se ejecuta el resto de la funcion init_gpu_data() de Model
         super().init_gpu_data(pipeline)
 
-def mundo_plano_clasico(size):
-    #Esto genera una plataforma sencilla de bloques
-    chunks=[]
-    for z in range(size):
-        for x in range(size):
-            (posX,posZ) = (x-size//2,z-size//2)
-            chunks.append(Chunk((posX,posZ),atlas))
+#Funcion responsable de revisar las colisiones del jugador
+def check_collisions(player, man):
+    collisions = man.check_collision("player")
+    if not collisions:
+        return
     
-    for c in chunks:
-        for z in range(Chunk.COUNT):
-            for x in range(Chunk.COUNT):
-                c.blocks[0][z][x] = Block("grass")
-        
-        #agregamos el chunk al grafo de escena
-        world.add_node(
-            name=f"chunk{c.id[0]},{c.id[1]}",
-            mesh=c,
-            pipeline=pipeline,
-            material=DEFAULT_MATERIALS["basic"],
-            texture=c.atlas,
-            position=[c.id[0]*Chunk.SIZE,0,c.id[1]*Chunk.SIZE]
-            )
-
-
+    print("Colisionando con:", *collisions)
 
 if __name__ == "__main__":
     #Crear la ventana
@@ -190,11 +187,58 @@ if __name__ == "__main__":
     assets_folder = os.path.join(os.path.dirname(__file__), "assets")
     atlas = Texture(assets_folder + "/atlas.png", minFilterMode=GL_NEAREST, maxFilterMode=GL_NEAREST)
 
-    cam = MyCam([0,5,0])
+    player = Player([0,5,0])
 
-    world = SceneGraph(cam)
+    world = SceneGraph(player)
+
+    #Inicializacion del manager de colisiones, y se registra la colision del jugador
+    manager = colliders.CollisionManager()
+    manager.add_collider(player.collider)
+
     #GENERACION DE MUNDO
-    mundo_plano_clasico(controller.WORLD_SIZE)
+    size = controller.WORLD_SIZE
+    #Esto genera una plataforma sencilla de bloques
+    chunks=[]
+    for z in range(size):
+        for x in range(size):
+            (posX,posZ) = (x-size//2,z-size//2)
+            chunks.append(Chunk((posX,posZ),atlas))
+    
+    for c in chunks:
+        for z in range(Chunk.COUNT):
+            for x in range(Chunk.COUNT):
+                c.blocks[0][z][x] = Block("grass")
+                manager.add_collider(colliders.AABB(f"{c.id[0]},{c.id[1]}|({x},0,{z})", [0,0,0], [1,1,1]))
+        
+        c.blocks[1][0][0] = Block("cobblestone")
+        manager.add_collider(colliders.AABB(f"{c.id[0]},{c.id[1]}|(0,1,0)", [0,0,0], [1,1,1]))
+        
+        #agregamos el chunk al grafo de escena
+        name=f"chunk{c.id[0]},{c.id[1]}"
+        world.add_node(
+            name=name,
+            mesh=c,
+            pipeline=pipeline,
+            material=DEFAULT_MATERIALS["basic"],
+            texture=c.atlas,
+            position=[c.id[0]*Chunk.SIZE,0,c.id[1]*Chunk.SIZE]
+            )
+    
+    world.update()
+
+    for c in chunks:
+        c_pos = world.find_position(f"chunk{c.id[0]},{c.id[1]}")
+        for z in range(Chunk.COUNT):
+            for x in range(Chunk.COUNT):
+                if c.blocks[0][z][x].id == "air":
+                    print("block is air")
+                    continue #no hay que colisionar con el aire
+                
+                local_pos = c.blocks[0][z][x].position
+                #Ajustamos la posicion real del AABB sumando la transformacion del chunk correspondiente
+                manager.set_position(f"{c.id[0]},{c.id[1]}|({x},0,{z})", local_pos + c_pos)
+
+    
 
     world.add_node("sun", light=DirectionalLight(ambient=[0.2,0.2,0.2]), pipeline=pipeline, rotation=[-np.pi/4, -np.pi/4, 0])
 
@@ -235,30 +279,32 @@ if __name__ == "__main__":
             controller.wireframe = not controller.wireframe
         
         if symbol == key.W:
-            cam.direction[0] = 1
+            player.direction[0] = 1
         if symbol == key.S:
-            cam.direction[0] = -1
+            player.direction[0] = -1
         if symbol == key.A:
-            cam.direction[1] = 1
+            player.direction[1] = 1
         if symbol == key.D:
-            cam.direction[1] = -1
+            player.direction[1] = -1
 
     @controller.event
     def on_key_release(symbol, modifiers):
         if symbol == key.W or symbol == key.S:
-            cam.direction[0] = 0
+            player.direction[0] = 0
         if symbol == key.A or symbol == key.D:
-            cam.direction[1] = 0
+            player.direction[1] = 0
 
     @controller.event
     def on_mouse_motion(x, y, dx, dy):
-        cam.yaw += dx * 0.001
-        cam.pitch += dy * 0.001
-        cam.pitch = math.clamp(cam.pitch, -(np.pi / 2 - 0.01), np.pi / 2 - 0.01)
+        player.yaw += dx * 0.001
+        player.pitch += dy * 0.001
+        player.pitch = math.clamp(player.pitch, -(np.pi / 2 - 0.01), np.pi / 2 - 0.01)
 
     def update(dt):
         world.update()
-        cam.time_update(dt)
+        player.player_update(dt)
+
+        check_collisions(player, manager)
 
         controller.time += dt
 
@@ -266,7 +312,7 @@ if __name__ == "__main__":
             fps = 1/dt if dt>0 else 0
             fps_label.text = f"FPS: {fps:.2f}"
 
-            pos = cam.position
+            pos = player.position
             pos_label.text = f"XYZ: {pos[0]:.1f}, {pos[1]:.1f}, {pos[2]:.1f}"
 
     clock.schedule_interval(update, 1/600)
