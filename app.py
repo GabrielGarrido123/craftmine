@@ -228,15 +228,16 @@ if __name__ == "__main__":
 
     for c in chunks:
         c_pos = world.find_position(f"chunk{c.id[0]},{c.id[1]}")
-        for z in range(Chunk.COUNT):
-            for x in range(Chunk.COUNT):
-                if c.blocks[0][z][x].id == "air":
-                    print("block is air")
-                    continue #no hay que colisionar con el aire
-                
-                local_pos = c.blocks[0][z][x].position
-                #Ajustamos la posicion real del AABB sumando la transformacion del chunk correspondiente
-                manager.set_position(f"{c.id[0]},{c.id[1]}|({x},0,{z})", local_pos + c_pos)
+        for y in range(Chunk.COUNT):
+            for z in range(Chunk.COUNT):
+                for x in range(Chunk.COUNT):
+                    if c.blocks[y][z][x].id == "air":
+                        print("block is air")
+                        continue #no hay que colisionar con el aire
+                    
+                    local_pos = c.blocks[y][z][x].position
+                    #Ajustamos la posicion real del AABB sumando la transformacion del chunk correspondiente
+                    manager.set_position(f"{c.id[0]},{c.id[1]}|({x},{y},{z})", local_pos + c_pos)
 
     
 
