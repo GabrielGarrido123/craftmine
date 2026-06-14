@@ -35,7 +35,7 @@ class Controller(Window):
         self.debug = False
 
         self.skyColor = np.array([0.2,0.55,0.85])
-        self.WORLD_SIZE = 4
+        self.WORLD_SIZE = 8
 
 class Player(FreeCamera):
     #clase del jugador. El jugador sera básicamente una camara, asi que\
@@ -45,6 +45,8 @@ class Player(FreeCamera):
         self.direction = direction
         self.speed = speed
         self.velocity = np.zeros(3)
+        self.gamemode = "spectator"
+        self.flystate = 0
 
         self.collider = colliders.AABB("player", [-0.4, -0.4, -0.4], [0.4, 0.4, 0.4])
     
@@ -54,14 +56,50 @@ class Player(FreeCamera):
         dir_norm = np.linalg.norm(dir)
         if dir_norm:
             dir /= dir_norm
+
         
         #Fisicas del jugador
         self.velocity += dir*self.speed
         self.position += self.velocity*dt
 
         self.collider.set_position(self.position)
+
         self.velocity = np.zeros(3)
 
+        self.focus = self.position + self.forward
+    
+    def player_collisions(self, colliders_list):
+        if self.gamemode == "spectator":
+            return
+        for collider in colliders_list:
+            if not collider.detect_collision(self.collider):
+                #se ignoran los que no colisionan
+                continue
+
+            #distancias de penetracion
+            d1 = collider.min - self.collider.max
+            d2 = collider.max - self.collider.min
+
+            #se elige la distancia mas corta por cada eje
+            dist = d1 if np.linalg.norm(d1) < np.linalg.norm(d2) else d2
+
+            #Buscamos eje de minima penetracion para corregir solo esa componente
+            min_dist = abs(dist[0])
+            desplz = np.array([dist[0], 0.0, 0.0])
+
+            for i in range(3):
+                k=abs(dist[i])
+                if k < min_dist:
+                    desplz = np.zeros(3)
+                    desplz[i] = dist[i]
+            
+            #evitamos que la posicion de la camara atraviese el bloque
+            self.position += desplz
+
+            #sincronizamos collider para el siguiente bloque de la lista
+            self.collider.set_position(self.position)
+        
+        #el foco debe actualizarse nuevamente en caso de haberse modificado la posicion de la misma en el for
         self.focus = self.position + self.forward
 
 def get_atlas_uv(offsets, atlas, resolution=16):
@@ -150,7 +188,8 @@ def check_collisions(player, man):
     if not collisions:
         return
     
-    print("Colisionando con:", *collisions)
+    player.player_collisions([manager[b] for b in collisions])
+
 
 if __name__ == "__main__":
     #Crear la ventana
@@ -232,7 +271,6 @@ if __name__ == "__main__":
             for z in range(Chunk.COUNT):
                 for x in range(Chunk.COUNT):
                     if c.blocks[y][z][x].id == "air":
-                        print("block is air")
                         continue #no hay que colisionar con el aire
                     
                     local_pos = c.blocks[y][z][x].position
@@ -287,6 +325,8 @@ if __name__ == "__main__":
             player.direction[1] = 1
         if symbol == key.D:
             player.direction[1] = -1
+        #if symbol == key.SPACE:
+        #    player.velocity[1] = 10
 
     @controller.event
     def on_key_release(symbol, modifiers):
@@ -294,6 +334,8 @@ if __name__ == "__main__":
             player.direction[0] = 0
         if symbol == key.A or symbol == key.D:
             player.direction[1] = 0
+        #if symbol == key.SPACE:
+        #    player.velocity[1] = 0
 
     @controller.event
     def on_mouse_motion(x, y, dx, dy):
