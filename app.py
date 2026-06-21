@@ -35,7 +35,7 @@ class Controller(Window):
         self.debug = False
 
         self.skyColor = np.array([0.2,0.55,0.85])
-        self.WORLD_SIZE = 1
+        self.WORLD_SIZE = 4
 
 class Player(FreeCamera):
     #clase del jugador. El jugador sera básicamente una camara, asi que\
@@ -124,24 +124,62 @@ BLOCKS_UV = {
     "cobblestone": [(2,16),(2,16),(2,16),(2,16),(2,16),(2,16)]
 }
 
+def getWorldBlock(x,y,z):
+    #retorna el puntero a un bloque cualquiera, independiente del chunk. None si no existe
+    chunk_pos_x = int(x)%Chunk.COUNT
+    chunk_pos_z = int(z)%Chunk.COUNT
+
+
 class Block:
     def __init__(self, id="air", chunk=None) -> None:
         self.id = id
         self.position = np.zeros(3)
         self.chunk = chunk
+        self.adyacentBlocksIds = {
+            "front": None,
+            "back": None,
+            "left": None,
+            "right": None,
+            "top": None,
+            "bottom": None
+        }
     
+    def check_adyacent(self):
+        x = int(self.position[0])
+        y = int(self.position[1])
+        z = int(self.position[2])
+        print(x,y,z,end=": ")
+
+        if z < 15:
+            self.adyacentBlocksIds["front"] = self.chunk.blocks[y][z+1][x].id
+        else:
+            self.adyacentBlocksIds["front"] = "air"
+        if z > 0:
+            self.adyacentBlocksIds["back"] = self.chunk.blocks[y][z-1][x].id
+        else:
+            self.adyacentBlocksIds["back"] = "air"
+        if x > 0:
+            self.adyacentBlocksIds["left"] = self.chunk.blocks[y][z][x-1].id
+        else:
+            self.adyacentBlocksIds["left"] = "air"
+        if x < 15:
+            self.adyacentBlocksIds["right"] = self.chunk.blocks[y][z][x+1].id
+        else:
+            self.adyacentBlocksIds["right"] = "air"
+        if y < 15:
+            self.adyacentBlocksIds["top"] = self.chunk.blocks[y+1][z][x].id
+        else:
+            self.adyacentBlocksIds["top"] = "air"
+        if y > 0:
+            self.adyacentBlocksIds["bottom"] = self.chunk.blocks[y-1][z][x].id
+        else:
+            self.adyacentBlocksIds["bottom"] = "air"
+
     def check_faces(self):
-        x = self.position[0]
-        y = self.position[1]
-        z = self.position[2]
-        return [
-            False,
-            True,
-            True,
-            True,
-            True,
-            True
-        ]
+        self.check_adyacent()
+        list = [i == "air" for i in self.adyacentBlocksIds.values()]
+        print(self.chunk.id,list,[i for i in self.adyacentBlocksIds.values()])
+        return list
 
 
 
@@ -166,10 +204,6 @@ class Chunk(Model):
         self.atlas = atlas
         self.id = id #tupla que contiene ubicacion en x y z respectivamente
     
-    def checkNeighbours(self):
-        #Frontal, +z
-        pass
-    
     #la clase (Chunk) modifica la funcion init_gpu_data de Model
     def init_gpu_data(self, pipeline):
         delta = Chunk.SIZE / Chunk.COUNT
@@ -191,11 +225,11 @@ class Chunk(Model):
 
                     #Version 2: Analisis por cara
                     visible = block.check_faces()
-                    deltaV = 24
+                    deltaV = 0
                     for i in range(6):
                         if not visible[i]:
                             continue
-                        
+                        deltaV += 4
                         self.uv_data.extend(get_atlas_uv(BLOCKS_UV[block.id][i], self.atlas))
 
                         for j in range(i*12, (i+1)*12):
@@ -206,12 +240,6 @@ class Chunk(Model):
                             index.append(vcount + shapes.Cube["indices"][j])
                         self.index_data.extend(index)
                     vcount += deltaV          
-
-                        
-
-
-
-
         
         #se ejecuta el resto de la funcion init_gpu_data() de Model
         super().init_gpu_data(pipeline)
@@ -260,7 +288,7 @@ if __name__ == "__main__":
     assets_folder = os.path.join(os.path.dirname(__file__), "assets")
     atlas = Texture(assets_folder + "/atlas.png", minFilterMode=GL_NEAREST, maxFilterMode=GL_NEAREST)
 
-    player = Player([0,5,0])
+    player = Player([0,5,0], speed=5)
 
     world = SceneGraph(player)
 
@@ -280,11 +308,11 @@ if __name__ == "__main__":
     for c in chunks:
         for z in range(Chunk.COUNT):
             for x in range(Chunk.COUNT):
-                c.blocks[0][z][x] = Block("grass", c)
-                manager.add_collider(colliders.AABB(f"{c.id[0]},{c.id[1]}|({x},0,{z})", [0,0,0], [1,1,1]))
+                c.blocks[1][z][x] = Block("grass", c)
+                manager.add_collider(colliders.AABB(f"{c.id[0]},{c.id[1]}|({x},1,{z})", [0,0,0], [1,1,1]))
         
-        c.blocks[1][0][0] = Block("cobblestone", c)
-        manager.add_collider(colliders.AABB(f"{c.id[0]},{c.id[1]}|(0,1,0)", [0,0,0], [1,1,1]))
+        c.blocks[2][0][0] = Block("cobblestone", c)
+        manager.add_collider(colliders.AABB(f"{c.id[0]},{c.id[1]}|(0,2,0)", [0,0,0], [1,1,1]))
         
         #agregamos el chunk al grafo de escena
         name=f"chunk{c.id[0]},{c.id[1]}"
