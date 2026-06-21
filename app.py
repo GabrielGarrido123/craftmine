@@ -35,7 +35,7 @@ class Controller(Window):
         self.debug = False
 
         self.skyColor = np.array([0.2,0.55,0.85])
-        self.WORLD_SIZE = 8
+        self.WORLD_SIZE = 1
 
 class Player(FreeCamera):
     #clase del jugador. El jugador sera básicamente una camara, asi que\
@@ -125,9 +125,25 @@ BLOCKS_UV = {
 }
 
 class Block:
-    def __init__(self, id="air") -> None:
+    def __init__(self, id="air", chunk=None) -> None:
         self.id = id
         self.position = np.zeros(3)
+        self.chunk = chunk
+    
+    def check_faces(self):
+        x = self.position[0]
+        y = self.position[1]
+        z = self.position[2]
+        return [
+            False,
+            True,
+            True,
+            True,
+            True,
+            True
+        ]
+
+
 
 class Chunk(Model):
     #La idea de crear una clase chunk, al igual que en el aux 10, es crear meshes que agrupen varios bloques, para asi optimizar el renderizado.
@@ -145,10 +161,14 @@ class Chunk(Model):
         for y in range(Chunk.COUNT):
             for z in range(Chunk.COUNT):
                 for x in range(Chunk.COUNT):
-                    self.blocks[y][z][x] = Block("air") #rellenamos la matriz de bloques con aire (bloque invisible)
+                    self.blocks[y][z][x] = Block("air", self) #rellenamos la matriz de bloques con aire (bloque invisible)
         
         self.atlas = atlas
-        self.id = id
+        self.id = id #tupla que contiene ubicacion en x y z respectivamente
+    
+    def checkNeighbours(self):
+        #Frontal, +z
+        pass
     
     #la clase (Chunk) modifica la funcion init_gpu_data de Model
     def init_gpu_data(self, pipeline):
@@ -158,7 +178,7 @@ class Chunk(Model):
         deltaV = cube_pos.shape[0]
         vcount = 0
 
-        #armado del mesh. Al modelo se le añaden los vertices de cada bloque del chunk (que si sea renderizado)
+        #armado del mesh. Al modelo se le añaden los vertices de cada bloque del chunk (que si sea renderizado, o sea no aire)
         for y in range(Chunk.COUNT):
             for z in range(Chunk.COUNT):
                 for x in range(Chunk.COUNT):
@@ -168,16 +188,30 @@ class Chunk(Model):
                     if block.id == "air":
                         #se skippea el bloque de aire, o bloque vacio.
                         continue
-                    
-                    for p in cube_pos:
-                        self.position_data.extend(p + block.position)
-                    
-                    for uv in BLOCKS_UV[block.id]:
-                        self.uv_data.extend(get_atlas_uv(uv, self.atlas))
-                    
-                    self.normal_data.extend(shapes.Cube["normal"])
-                    self.index_data.extend([vcount + i for i in shapes.Cube["indices"]])
-                    vcount += deltaV
+
+                    #Version 2: Analisis por cara
+                    visible = block.check_faces()
+                    deltaV = 24
+                    for i in range(6):
+                        if not visible[i]:
+                            continue
+                        
+                        self.uv_data.extend(get_atlas_uv(BLOCKS_UV[block.id][i], self.atlas))
+
+                        for j in range(i*12, (i+1)*12):
+                            self.position_data.append(shapes.Cube["position"][j] + block.position[j%3])
+                            self.normal_data.append(shapes.Cube["normal"][j])
+                        index = []
+                        for j in range(i*6, (i+1)*6):
+                            index.append(vcount + shapes.Cube["indices"][j])
+                        self.index_data.extend(index)
+                    vcount += deltaV          
+
+                        
+
+
+
+
         
         #se ejecuta el resto de la funcion init_gpu_data() de Model
         super().init_gpu_data(pipeline)
@@ -246,10 +280,10 @@ if __name__ == "__main__":
     for c in chunks:
         for z in range(Chunk.COUNT):
             for x in range(Chunk.COUNT):
-                c.blocks[0][z][x] = Block("grass")
+                c.blocks[0][z][x] = Block("grass", c)
                 manager.add_collider(colliders.AABB(f"{c.id[0]},{c.id[1]}|({x},0,{z})", [0,0,0], [1,1,1]))
         
-        c.blocks[1][0][0] = Block("cobblestone")
+        c.blocks[1][0][0] = Block("cobblestone", c)
         manager.add_collider(colliders.AABB(f"{c.id[0]},{c.id[1]}|(0,1,0)", [0,0,0], [1,1,1]))
         
         #agregamos el chunk al grafo de escena
