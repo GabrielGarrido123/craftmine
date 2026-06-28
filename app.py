@@ -20,8 +20,18 @@ from utils.camera import FreeCamera
 from utils.scene_graph import SceneGraph
 from utils.drawables import Texture, Model, DirectionalLight, Material
 from utils import shapes
-
 from utils import colliders
+
+DEFAULT_MATERIALS = {
+    "basic": Material(specular=[0.4,0.4,0.4]),
+    "metal": Material(shininess=64)
+}
+
+BLOCKS_UV = {
+    "air": [],
+    "grass": [(27, 20), (27, 20), (27, 20), (27, 20), (28, 18), (23, 23)],
+    "cobblestone": [(2,16),(2,16),(2,16),(2,16),(2,16),(2,16)]
+}
 
 class Controller(Window):
     #hereda caracteristicas de pyglet.window.Window
@@ -35,7 +45,7 @@ class Controller(Window):
         self.debug = False
 
         self.skyColor = np.array([0.2,0.55,0.85])
-        self.WORLD_SIZE = 4
+        self.WORLD_SIZE = 2
 
 class Player(FreeCamera):
     #clase del jugador. El jugador sera básicamente una camara, asi que\
@@ -45,7 +55,7 @@ class Player(FreeCamera):
         self.direction = direction
         self.speed = speed
         self.velocity = np.zeros(3)
-        self.gamemode = "spectator"
+        self.gamemode = "creative"
         self.flystate = 0
 
         self.collider = colliders.AABB("player", [-0.4, -0.4, -0.4], [0.4, 0.4, 0.4])
@@ -56,7 +66,6 @@ class Player(FreeCamera):
         dir_norm = np.linalg.norm(dir)
         if dir_norm:
             dir /= dir_norm
-
         
         #Fisicas del jugador
         self.velocity += dir*self.speed
@@ -113,23 +122,6 @@ def get_atlas_uv(offsets, atlas, resolution=16):
         dx*xoff         ,dy*(yoff+1)
     ]
 
-DEFAULT_MATERIALS = {
-    "basic": Material(specular=[0.4,0.4,0.4]),
-    "metal": Material(shininess=64)
-}
-
-BLOCKS_UV = {
-    "air": [],
-    "grass": [(27, 20), (27, 20), (27, 20), (27, 20), (28, 18), (23, 23)],
-    "cobblestone": [(2,16),(2,16),(2,16),(2,16),(2,16),(2,16)]
-}
-
-def getWorldBlock(x,y,z):
-    #retorna el puntero a un bloque cualquiera, independiente del chunk. None si no existe
-    chunk_pos_x = int(x)%Chunk.COUNT
-    chunk_pos_z = int(z)%Chunk.COUNT
-
-
 class Block:
     def __init__(self, id="air", chunk=None) -> None:
         self.id = id
@@ -148,7 +140,6 @@ class Block:
         x = int(self.position[0])
         y = int(self.position[1])
         z = int(self.position[2])
-        print(x,y,z,end=": ")
 
         if z < 15:
             self.adyacentBlocksIds["front"] = self.chunk.blocks[y][z+1][x].id
@@ -178,7 +169,6 @@ class Block:
     def check_faces(self):
         self.check_adyacent()
         list = [i == "air" for i in self.adyacentBlocksIds.values()]
-        print(self.chunk.id,list,[i for i in self.adyacentBlocksIds.values()])
         return list
 
 
@@ -207,9 +197,6 @@ class Chunk(Model):
     #la clase (Chunk) modifica la funcion init_gpu_data de Model
     def init_gpu_data(self, pipeline):
         delta = Chunk.SIZE / Chunk.COUNT
-        cube_pos = [(coord + 0.5)*delta for coord in shapes.Cube["position"]]
-        cube_pos = np.reshape(cube_pos, (len(cube_pos) // 3, 3))
-        deltaV = cube_pos.shape[0]
         vcount = 0
 
         #armado del mesh. Al modelo se le añaden los vertices de cada bloque del chunk (que si sea renderizado, o sea no aire)
@@ -226,6 +213,7 @@ class Chunk(Model):
                     #Version 2: Analisis por cara
                     visible = block.check_faces()
                     deltaV = 0
+                    faces_drawn = 0
                     for i in range(6):
                         if not visible[i]:
                             continue
@@ -235,14 +223,18 @@ class Chunk(Model):
                         for j in range(i*12, (i+1)*12):
                             self.position_data.append(shapes.Cube["position"][j] + block.position[j%3])
                             self.normal_data.append(shapes.Cube["normal"][j])
-                        index = []
-                        for j in range(i*6, (i+1)*6):
-                            index.append(vcount + shapes.Cube["indices"][j])
-                        self.index_data.extend(index)
+                        
+                        self.index_data.extend([vcount + shapes.Cube["indices"][j] for j in range(faces_drawn*6, (faces_drawn+1)*6)])
+                        faces_drawn += 1
                     vcount += deltaV          
         
         #se ejecuta el resto de la funcion init_gpu_data() de Model
         super().init_gpu_data(pipeline)
+
+def getWorldBlock(x,y,z):
+    #retorna el puntero a un bloque cualquiera, independiente del chunk. None si no existe
+    chunk_pos_x = int(x)%Chunk.COUNT
+    chunk_pos_z = int(z)%Chunk.COUNT
 
 #Funcion responsable de revisar las colisiones del jugador
 def check_collisions(player, man):
@@ -252,50 +244,7 @@ def check_collisions(player, man):
     
     player.player_collisions([manager[b] for b in collisions])
 
-
-if __name__ == "__main__":
-    #Crear la ventana
-    controller = Controller(800,600, "CraftMine")
-    controller.set_exclusive_mouse(controller.mouseLocked)
-
-    #Contador de FPS para el Debug. Sacado de Aux10 del repo de auxiliares del curso
-    fps_label = text.Label(
-        text="FPS: 0.00",
-        font_name="Arial",
-        font_size=16,
-        x=controller.width - 10,
-        y=controller.height - 10,
-        anchor_x="right",
-        anchor_y="top",
-        color=(255,255,255,255)
-    )
-
-    #Para mostrar la posicion en el espacio. Tambien es del Debug
-    pos_label = text.Label(
-        text="XYZ: 0.00, 0.00, 0.00",
-        font_name="Arial",
-        font_size=16,
-        x=10,
-        y=controller.height - 10,
-        anchor_x="left",
-        anchor_y="top",
-        color=(255,255,255,255)
-    )
-
-    game_shaders = os.path.join(os.path.dirname(__file__), "game_shaders")
-    pipeline = init_pipeline(game_shaders + "/blinn_phong.vert", game_shaders + "/blinn_phong.frag")
-
-    assets_folder = os.path.join(os.path.dirname(__file__), "assets")
-    atlas = Texture(assets_folder + "/atlas.png", minFilterMode=GL_NEAREST, maxFilterMode=GL_NEAREST)
-
-    player = Player([0,5,0], speed=5)
-
-    world = SceneGraph(player)
-
-    #Inicializacion del manager de colisiones, y se registra la colision del jugador
-    manager = colliders.CollisionManager()
-    manager.add_collider(player.collider)
-
+def generar_mundo():
     #GENERACION DE MUNDO
     size = controller.WORLD_SIZE
     #Esto genera una plataforma sencilla de bloques
@@ -306,13 +255,11 @@ if __name__ == "__main__":
             chunks.append(Chunk((posX,posZ),atlas))
     
     for c in chunks:
-        for z in range(Chunk.COUNT):
-            for x in range(Chunk.COUNT):
-                c.blocks[1][z][x] = Block("grass", c)
-                manager.add_collider(colliders.AABB(f"{c.id[0]},{c.id[1]}|({x},1,{z})", [0,0,0], [1,1,1]))
-        
-        c.blocks[2][0][0] = Block("cobblestone", c)
-        manager.add_collider(colliders.AABB(f"{c.id[0]},{c.id[1]}|(0,2,0)", [0,0,0], [1,1,1]))
+        for y in range(Chunk.COUNT):
+            for z in range(Chunk.COUNT):
+                for x in range(Chunk.COUNT):
+                    c.blocks[y][z][x] = Block("grass", c)
+                    manager.add_collider(colliders.AABB(f"{c.id[0]},{c.id[1]}|({x},{y},{z})", [0,0,0], [1,1,1]))
         
         #agregamos el chunk al grafo de escena
         name=f"chunk{c.id[0]},{c.id[1]}"
@@ -339,7 +286,61 @@ if __name__ == "__main__":
                     #Ajustamos la posicion real del AABB sumando la transformacion del chunk correspondiente
                     manager.set_position(f"{c.id[0]},{c.id[1]}|({x},{y},{z})", local_pos + c_pos)
 
-    
+if __name__ == "__main__":
+    #Crear la ventana
+    controller = Controller(800,600, "CraftMine")
+    controller.set_exclusive_mouse(controller.mouseLocked)
+
+    #Contador de FPS para el Debug. Sacado de Aux10 del repo de auxiliares del curso
+    fps_label = text.Label(
+        text="FPS: 0.00",
+        font_name="Arial",
+        font_size=16,
+        x=controller.width - 10,
+        y=controller.height - 10,
+        anchor_x="right",
+        anchor_y="top",
+        color=(255,255,255,255)
+    )
+
+    #Para mostrar la posicion en el espacio. Tambien es del Debug
+    pos_label = text.Label(
+        text="Position: 0.00, 0.00, 0.00",
+        font_name="Arial",
+        font_size=16,
+        x=10,
+        y=controller.height - 10,
+        anchor_x="left",
+        anchor_y="top",
+        color=(255,255,255,255)
+    )
+
+    vel_label = text.Label(
+        text="Velocity: 0.00, 0.00, 0.00",
+        font_name="Arial",
+        font_size=16,
+        x=10,
+        y=controller.height - 20,
+        anchor_x="left",
+        anchor_y="top",
+        color=(255,255,255,255)
+    )
+
+    game_shaders = os.path.join(os.path.dirname(__file__), "game_shaders")
+    pipeline = init_pipeline(game_shaders + "/blinn_phong.vert", game_shaders + "/blinn_phong.frag")
+
+    assets_folder = os.path.join(os.path.dirname(__file__), "assets")
+    atlas = Texture(assets_folder + "/atlas.png", minFilterMode=GL_NEAREST, maxFilterMode=GL_NEAREST)
+
+    player = Player([0,20,0], speed=5)
+
+    world = SceneGraph(player)
+
+    #Inicializacion del manager de colisiones, y se registra la colision del jugador
+    manager = colliders.CollisionManager()
+    manager.add_collider(player.collider)
+
+    generar_mundo()
 
     world.add_node("sun", light=DirectionalLight(ambient=[0.2,0.2,0.2]), pipeline=pipeline, rotation=[-np.pi/4, -np.pi/4, 0])
 
@@ -363,6 +364,7 @@ if __name__ == "__main__":
         if controller.debug:
             fps_label.draw()
             pos_label.draw()
+            vel_label.draw()
     
     @controller.event
     def on_key_press(symbol, modifiers):
@@ -418,7 +420,10 @@ if __name__ == "__main__":
             fps_label.text = f"FPS: {fps:.2f}"
 
             pos = player.position
-            pos_label.text = f"XYZ: {pos[0]:.1f}, {pos[1]:.1f}, {pos[2]:.1f}"
+            pos_label.text = f"Position: {pos[0]:.1f}, {pos[1]:.1f}, {pos[2]:.1f}"
+
+            vel = player.velocity
+            vel_label.text = f"Velocity: {vel[0]:.1f}, {vel[1]:.1f}, {vel[2]:.1f}"
 
     clock.schedule_interval(update, 1/600)
     run()
