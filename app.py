@@ -48,30 +48,106 @@ class Controller(Window):
 class Player(FreeCamera):
     #clase del jugador. El jugador sera básicamente una camara, asi que\
     #hereda caracteristicas de utils.camera.FreeCamera
-    def __init__(self, position=np.zeros(3), camera_type="perspective", direction=np.zeros(3), speed=2):
+    def __init__(self, position=np.zeros(3), camera_type="perspective", direction=np.zeros(3), speed=4):
         super().__init__(position, camera_type)
         self.direction = direction
         self.speed = speed
         self.velocity = np.zeros(3)
-        self.gamemode = "creative"
-        self.flystate = 0
 
-        self.collider = colliders.AABB("player", [-0.4, -0.4, -0.4], [0.4, 0.4, 0.4])
+        #gestiona cómo se mueve el jugador: "survival", "creative" y "spectator"
+        self.gamemode = "survival"
+        self.flystate = 0
+        self.is_W_Pressed = False
+        self.is_S_Pressed = False
+        self.is_A_Pressed = False
+        self.is_D_Pressed = False
+        self.is_SPACE_Pressed = False
+        
+        #notar que p_pos es la posicion del jugador, es decir la bounding box.
+        self.p_pos = np.array(position, dtype=float)
+        self.collider = colliders.AABB("player", [-0.4, 0.0, -0.4], [0.4, 1.8, 0.4])
+        self.collider.set_position(self.p_pos)
+
+        #en cambio self.position es la posicion de la camara en si, y eye_height es la altura donde se ubica la misma en el jugador.
+        self.eye_height = np.array([0.0, 1.7, 0.0])
+
+        #atributos fisicos
+        self.gravity = -18.0
+        self.vertical_velocity = 0.0
+        self.jump_strength = 7.0
+        self.is_on_ground = False
+        self.is_flying = False
     
     def player_update(self,dt):
         self.update() #metodo update() heredado de FreeCamera
-        dir = self.direction[0]*self.forward + self.direction[1]*self.right
+
+        front_axis = 2
+        side_axis = 0
+        if self.gamemode == "spectator":
+            front_axis = 0
+            side_axis = 1
+        
+        #Actualizamos la direccion en base al input
+        if (self.is_W_Pressed and self.is_S_Pressed) or not(self.is_W_Pressed or self.is_S_Pressed):
+            self.direction[front_axis] = 0
+        elif self.is_W_Pressed:
+            self.direction[front_axis] = 1
+        else:
+            self.direction[front_axis] = -1
+        
+        if (self.is_A_Pressed and self.is_D_Pressed) or not(self.is_A_Pressed or self.is_D_Pressed):
+            self.direction[side_axis] = 0
+        elif self.is_A_Pressed:
+            self.direction[side_axis] = 1
+        else:
+            self.direction[side_axis] = -1
+
+        #calculos de direccion del jugador (y la camara)
+        if self.gamemode == "spectator":
+            #la camara puede moverse libremente
+
+            dir = self.direction[0]*self.forward + self.direction[1]*self.right
+            dir_norm = np.linalg.norm(dir)
+            if dir_norm:
+                dir /= dir_norm
+            
+            #Fisicas del jugador
+            self.velocity += dir*self.speed
+            self.position += self.velocity*dt
+
+            self.collider.set_position(self.position)
+            self.velocity = np.zeros(3)
+            self.focus = self.position + self.forward
+            return
+        
+        #Cuando NO se esta en modo espectador, la camara funciona de forma distinta:
+        #- la camara solo se mueve en plano horizontal (x, z) por teclado.
+        dir = self.direction[2] * self.forward + self.direction[0] * self.right
+        dir[1] = 0.0 
         dir_norm = np.linalg.norm(dir)
         if dir_norm:
             dir /= dir_norm
         
-        #Fisicas del jugador
-        self.velocity += dir*self.speed
-        self.position += self.velocity*dt
+        #aplicamos un salto si es que aplica
+        if player.is_SPACE_Pressed and player.is_on_ground and not player.gamemode == "spectator":
+            self.vertical_velocity = self.jump_strength
 
-        self.collider.set_position(self.position)
+        #calculo de gravedad
+        self.vertical_velocity += self.gravity * dt
+        self.velocity[1] = self.vertical_velocity
+        
+        self.velocity[0] = dir[0] * self.speed
+        self.velocity[2] = dir[2] * self.speed
 
-        self.velocity = np.zeros(3)
+        #aplicamos desplazamiento al bounding box del jugador
+        self.p_pos += self.velocity * dt
+        self.collider.set_position(self.p_pos)
+
+        #se sincroniza la camara
+        self.position = self.p_pos + self.eye_height
+
+        #reseteo de atributos
+        self.is_on_ground = False
 
         self.focus = self.position + self.forward
     
@@ -91,22 +167,28 @@ class Player(FreeCamera):
             #se elige la distancia mas corta por cada eje
             dist = d1 if np.linalg.norm(d1) < np.linalg.norm(d2) else d2
 
-            #Buscamos eje de minima penetracion para corregir solo esa componente
+            #Buscamos eje de minima penetracion
             min_dist = abs(dist[0])
-            desplz = np.array([dist[0], 0.0, 0.0])
-
+            axis = 0
             for i in range(3):
-                k=abs(dist[i])
-                if k < min_dist:
-                    min_dist = k
-                    desplz = np.zeros(3)
-                    desplz[i] = dist[i]
+                if abs(dist[i]) < min_dist:
+                    min_dist = abs(dist[i])
+                    axis = i
             
-            #evitamos que la posicion de la camara atraviese el bloque
-            self.position += desplz
+            #se construye el vector de correccion de la posicion
+            desplz = np.zeros(3)
+            desplz[axis] = dist[axis]
 
-            #sincronizamos collider para el siguiente bloque de la lista
-            self.collider.set_position(self.position)
+            #corregimos posicion de bounding box
+            self.p_pos += desplz
+            self.collider.set_position(self.p_pos)
+
+            #corregimos posicion de la camara
+            self.position = self.p_pos + self.eye_height
+
+            if axis == 1 and dist[1] > 0:
+                self.vertical_velocity = 0.0
+                self.is_on_ground = True
         
         #el foco debe actualizarse nuevamente en caso de haberse modificado la posicion de la misma en el for
         self.focus = self.position + self.forward
@@ -233,7 +315,7 @@ class Chunk(Model):
 spatial_grid = {}
 
 #Funcion responsable de revisar las colisiones del jugador
-def check_collisions(player, man):
+def check_collisions_old(player, man):
     px, _, pz = player.position
 
     center_x = int(np.floor(px))
@@ -258,6 +340,13 @@ def check_collisions(player, man):
         return
 
     player.player_collisions(collisions)
+
+def check_collisions(player, man):
+    collisions = manager.check_collision("player")
+    if not collisions:
+        return
+
+    player.player_collisions([manager[b] for b in collisions])
 
 def generar_mundo():
     #GENERACION DE MUNDO
@@ -402,26 +491,31 @@ if __name__ == "__main__":
         if symbol == key.F5:
             #Activa/desactiva el Wireframe
             controller.wireframe = not controller.wireframe
-        
+
+        #Movimiento
         if symbol == key.W:
-            player.direction[0] = 1
+            player.is_W_Pressed = True
         if symbol == key.S:
-            player.direction[0] = -1
+            player.is_S_Pressed = True
         if symbol == key.A:
-            player.direction[1] = 1
+            player.is_A_Pressed = True
         if symbol == key.D:
-            player.direction[1] = -1
-        #if symbol == key.SPACE:
-        #    player.velocity[1] = 10
+            player.is_D_Pressed = True
+        if symbol == key.SPACE:
+            player.is_SPACE_Pressed = True
 
     @controller.event
-    def on_key_release(symbol, modifiers):
-        if symbol == key.W or symbol == key.S:
-            player.direction[0] = 0
-        if symbol == key.A or symbol == key.D:
-            player.direction[1] = 0
-        #if symbol == key.SPACE:
-        #    player.velocity[1] = 0
+    def on_key_release(symbol, modifiers):        
+        if symbol == key.W:
+            player.is_W_Pressed = False
+        if symbol == key.S:
+            player.is_S_Pressed = False
+        if symbol == key.A:
+            player.is_A_Pressed = False
+        if symbol == key.D:
+            player.is_D_Pressed = False
+        if symbol == key.SPACE:
+            player.is_SPACE_Pressed = False
 
     @controller.event
     def on_mouse_motion(x, y, dx, dy):
@@ -441,7 +535,7 @@ if __name__ == "__main__":
             fps = 1/dt if dt>0 else 0
             fps_label.text = f"FPS: {fps:.2f}"
 
-            pos = player.position
+            pos = player.p_pos
             pos_label.text = f"Position: {pos[0]:.1f}, {pos[1]:.1f}, {pos[2]:.1f}"
 
             vel = player.velocity
