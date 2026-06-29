@@ -22,10 +22,8 @@ from utils.drawables import Texture, Model, DirectionalLight, Material
 from utils import shapes
 from utils import colliders
 
-DEFAULT_MATERIALS = {
-    "basic": Material(specular=[0.4,0.4,0.4]),
-    "metal": Material(shininess=64)
-}
+DEFAULT_MATERIAL = Material(specular=[0.4,0.4,0.4])
+
 
 BLOCKS_UV = {
     "air": [],
@@ -79,7 +77,8 @@ class Player(FreeCamera):
     
     def player_collisions(self, colliders_list):
         if self.gamemode == "spectator":
-            return
+            return #el "modo espectador" hace que el jugador no colisione con nada
+        
         for collider in colliders_list:
             if not collider.detect_collision(self.collider):
                 #se ignoran los que no colisionan
@@ -99,6 +98,7 @@ class Player(FreeCamera):
             for i in range(3):
                 k=abs(dist[i])
                 if k < min_dist:
+                    min_dist = k
                     desplz = np.zeros(3)
                     desplz[i] = dist[i]
             
@@ -171,8 +171,6 @@ class Block:
         list = [i == "air" for i in self.adyacentBlocksIds.values()]
         return list
 
-
-
 class Chunk(Model):
     #La idea de crear una clase chunk, al igual que en el aux 10, es crear meshes que agrupen varios bloques, para asi optimizar el renderizado.
     #Esto significa que los chunks deben heredar metodos de utils.drawables.Model
@@ -231,18 +229,35 @@ class Chunk(Model):
         #se ejecuta el resto de la funcion init_gpu_data() de Model
         super().init_gpu_data(pipeline)
 
-def getWorldBlock(x,y,z):
-    #retorna el puntero a un bloque cualquiera, independiente del chunk. None si no existe
-    chunk_pos_x = int(x)%Chunk.COUNT
-    chunk_pos_z = int(z)%Chunk.COUNT
+#Global requerido
+spatial_grid = {}
 
 #Funcion responsable de revisar las colisiones del jugador
 def check_collisions(player, man):
-    collisions = man.check_collision("player")
+    px, _, pz = player.position
+
+    center_x = int(np.floor(px))
+    center_z = int(np.floor(pz))
+
+    candidates = []
+    
+    #se consulta un vecindario cerrado de 3x3 bloques en el suelo horizontal y=0
+    for dx in range(center_x - 1, center_x + 2):
+        for dz in range(center_z - 1, center_z + 2):
+            grid_key = (dx, 0, dz)
+            if grid_key in spatial_grid:
+                candidates.append(spatial_grid[grid_key])
+    
+    #Fase Narrow
+    collisions = []
+    for collider in candidates:
+        if collider.detect_collision(player.collider):
+            collisions.append(collider)
+    
     if not collisions:
         return
-    
-    player.player_collisions([manager[b] for b in collisions])
+
+    player.player_collisions(collisions)
 
 def generar_mundo():
     #GENERACION DE MUNDO
@@ -255,7 +270,7 @@ def generar_mundo():
             chunks.append(Chunk((posX,posZ),atlas))
     
     for c in chunks:
-        for y in range(Chunk.COUNT):
+        for y in range(1):
             for z in range(Chunk.COUNT):
                 for x in range(Chunk.COUNT):
                     c.blocks[y][z][x] = Block("grass", c)
@@ -267,7 +282,7 @@ def generar_mundo():
             name=name,
             mesh=c,
             pipeline=pipeline,
-            material=DEFAULT_MATERIALS["basic"],
+            material=DEFAULT_MATERIAL,
             texture=c.atlas,
             position=[c.id[0]*Chunk.SIZE,0,c.id[1]*Chunk.SIZE]
             )
@@ -282,9 +297,16 @@ def generar_mundo():
                     if c.blocks[y][z][x].id == "air":
                         continue #no hay que colisionar con el aire
                     
-                    local_pos = c.blocks[y][z][x].position
-                    #Ajustamos la posicion real del AABB sumando la transformacion del chunk correspondiente
-                    manager.set_position(f"{c.id[0]},{c.id[1]}|({x},{y},{z})", local_pos + c_pos)
+                    local_pos = c.blocks[y][z][x].position + np.array([-0.5,-0.5,-0.5])
+                    global_pos = local_pos + c_pos
+
+                    collider_name = f"{c.id[0]},{c.id[1]}|({x},{y},{z})"
+                    manager.set_position(collider_name, global_pos)
+
+                    #Registramos las coordenadas discretas globales en spatial_grid
+                    gx = int(np.floor(global_pos[0]))
+                    gz = int(np.floor(global_pos[2]))
+                    spatial_grid[(gx,0,gz)] = manager[collider_name]
 
 if __name__ == "__main__":
     #Crear la ventana
@@ -307,7 +329,7 @@ if __name__ == "__main__":
     pos_label = text.Label(
         text="Position: 0.00, 0.00, 0.00",
         font_name="Arial",
-        font_size=16,
+        font_size=12,
         x=10,
         y=controller.height - 10,
         anchor_x="left",
@@ -318,9 +340,9 @@ if __name__ == "__main__":
     vel_label = text.Label(
         text="Velocity: 0.00, 0.00, 0.00",
         font_name="Arial",
-        font_size=16,
+        font_size=12,
         x=10,
-        y=controller.height - 20,
+        y=controller.height - 30,
         anchor_x="left",
         anchor_y="top",
         color=(255,255,255,255)
@@ -342,7 +364,7 @@ if __name__ == "__main__":
 
     generar_mundo()
 
-    world.add_node("sun", light=DirectionalLight(ambient=[0.2,0.2,0.2]), pipeline=pipeline, rotation=[-np.pi/4, -np.pi/4, 0])
+    world.add_node("sun", light=DirectionalLight(ambient=[0.4,0.4,0.4]), pipeline=pipeline, rotation=[-np.pi/4, -np.pi/4, 0])
 
     @controller.event
     def on_draw():
@@ -364,7 +386,7 @@ if __name__ == "__main__":
         if controller.debug:
             fps_label.draw()
             pos_label.draw()
-            vel_label.draw()
+            #vel_label.draw()
     
     @controller.event
     def on_key_press(symbol, modifiers):
