@@ -21,14 +21,16 @@ from utils.scene_graph import SceneGraph
 from utils.drawables import Texture, Model, DirectionalLight, Material
 from utils import shapes
 from utils import colliders
+import grafica.transformations as tr
 
 DEFAULT_MATERIAL = Material(specular=[0.4,0.4,0.4])
-
 
 BLOCKS_UV = {
     "air": [],
     "grass": [(27, 20), (27, 20), (27, 20), (27, 20), (28, 18), (23, 23)],
-    "cobblestone": [(2,16),(2,16),(2,16),(2,16),(2,16),(2,16)]
+    "cobblestone": [(2,16),(2,16),(2,16),(2,16),(2,16),(2,16)],
+    "dirt": [(23, 23), (23, 23), (23, 23), (23, 23), (23, 23), (23, 23)],
+    "bedrock": [(11, 31),(11, 31),(11, 31),(11, 31),(11, 31),(11, 31)]
 }
 
 class Controller(Window):
@@ -38,9 +40,22 @@ class Controller(Window):
 
         self.time = 0
 
+        self.daytime = 0 #valor de 0 a 2. 1 es noche
+
         self.wireframe = False
         self.mouseLocked = True
         self.debug = False
+
+        #self.dayColor = np.array([0.64,0.827,0.937])
+        self.dayColor = np.array([0.392, 0.721, 0.937])
+        self.sunsetColor = np.array([1.0,0.67,0.18])
+        self.nightColor = np.array([9/255,10/255,33/255])
+
+        self.dayLightColor = np.array([1,1,1])
+        self.sunsetLightColor = np.array([1.0, 0.67, 0.18])
+        self.nightLightColor = np.array([0,0,0])
+
+        self.lightColor = np.array([1,1,1])
 
         self.skyColor = np.array([0.2,0.55,0.85])
         self.WORLD_SIZE = 2
@@ -48,15 +63,14 @@ class Controller(Window):
 class Player(FreeCamera):
     #clase del jugador. El jugador sera básicamente una camara, asi que\
     #hereda caracteristicas de utils.camera.FreeCamera
-    def __init__(self, position=np.zeros(3), camera_type="perspective", direction=np.zeros(3), speed=4):
+    def __init__(self, position=np.zeros(3), camera_type="perspective", direction=np.zeros(3), speed=4, gamemode="survival"):
         super().__init__(position, camera_type)
         self.direction = direction
         self.speed = speed
         self.velocity = np.zeros(3)
 
-        #gestiona cómo se mueve el jugador: "survival", "creative" y "spectator"
-        self.gamemode = "survival"
-        self.flystate = 0
+        #gestiona cómo se mueve el jugador: "survival" es con fisicas y "spectator" es camara libre
+        self.gamemode = gamemode
         self.is_W_Pressed = False
         self.is_S_Pressed = False
         self.is_A_Pressed = False
@@ -77,6 +91,15 @@ class Player(FreeCamera):
         self.jump_strength = 7.0
         self.is_on_ground = False
         self.is_flying = False
+    
+    def reset_player(self):
+        #para reestablecer al jugador al origen
+        self.p_pos = np.array([0.0, 10.0, 0.0])
+        self.vertical_velocity = 0.0
+        self.velocity = np.zeros(3)
+        self.collider.set_position(self.p_pos)
+        self.position = self.p_pos + self.eye_height
+        self.focus = self.position + self.forward
     
     def player_update(self,dt):
         self.update() #metodo update() heredado de FreeCamera
@@ -153,6 +176,7 @@ class Player(FreeCamera):
     
     def player_collisions(self, colliders_list):
         if self.gamemode == "spectator":
+            self.p_pos = self.position
             return #el "modo espectador" hace que el jugador no colisione con nada
         
         for collider in colliders_list:
@@ -190,7 +214,7 @@ class Player(FreeCamera):
                 self.vertical_velocity = 0.0
                 self.is_on_ground = True
         
-        #el foco debe actualizarse nuevamente en caso de haberse modificado la posicion de la misma en el for
+        #el foco debe actualizarse nuevamente en caso de haberse modificado la posicion de la misma dentro del for loop
         self.focus = self.position + self.forward
 
 def get_atlas_uv(offsets, atlas, resolution=16):
@@ -348,8 +372,50 @@ def check_collisions(player, man):
 
     player.player_collisions([manager[b] for b in collisions])
 
-def generar_mundo():
-    #GENERACION DE MUNDO
+if __name__ == "__main__":
+    #Crear la ventana
+    controller = Controller(960,720, "CraftMine")
+    controller.set_exclusive_mouse(controller.mouseLocked)
+
+    game_shaders = os.path.join(os.path.dirname(__file__), "game_shaders")
+    assets_folder = os.path.join(os.path.dirname(__file__), "assets")
+
+    player = Player([0,10,0], speed=5, gamemode="survival")
+
+    pipeline = init_pipeline(game_shaders + "/blinn_phong.vert", game_shaders + "/blinn_phong.frag")
+
+    #======================================================================================================================================
+    #                                                               SKYBOX 
+    #======================================================================================================================================
+    sky_pipeline = init_pipeline(game_shaders + "/sky.vert", game_shaders + "/sky.frag")
+
+    skybox = SceneGraph(player)
+
+    sun_texture = Texture(assets_folder + "/sun.png", minFilterMode=GL_NEAREST, maxFilterMode=GL_NEAREST)
+    moon_texture = Texture(assets_folder + "/moon.png", minFilterMode=GL_NEAREST, maxFilterMode=GL_NEAREST)
+
+    sun = Model(shapes.Square["position"], uv_data=shapes.Square["uv"], index_data=shapes.Square["indices"])
+    skybox.add_node("sun_obj", mesh=sun, texture=sun_texture, pipeline=sky_pipeline)
+    skybox["sun_obj"]["scale"] = [2,2,2]
+    sun.gpu_data.isSun[:] = [1 for i in sun.gpu_data.isSun[:]]
+
+    moon = Model(shapes.Square["position"], uv_data=shapes.Square["uv"], index_data=shapes.Square["indices"])
+    skybox.add_node("moon_obj", mesh=moon, texture=moon_texture, pipeline=sky_pipeline)
+    skybox["moon_obj"]["scale"] = [2,2,2]
+    moon.gpu_data.isSun[:] = [0 for i in moon.gpu_data.isSun[:]]
+
+    skybox.add_node("sun_light", light=DirectionalLight(ambient=[0.4,0.4,0.4], diffuse=[1,1,1], specular=[1,1,1]), pipeline=pipeline, rotation=[-np.pi/8, np.pi/2, 0])
+    #================================================================================================================================
+    #                                                           GENERACION DE MUNDO
+    #================================================================================================================================
+    world = SceneGraph(player)
+
+    atlas = Texture(assets_folder + "/atlas.png", minFilterMode=GL_NEAREST, maxFilterMode=GL_NEAREST)
+
+    #Inicializacion del manager de colisiones, y se registra la colision del jugador
+    manager = colliders.CollisionManager()
+    manager.add_collider(player.collider)
+
     size = controller.WORLD_SIZE
     #Esto genera una plataforma sencilla de bloques
     chunks=[]
@@ -359,10 +425,15 @@ def generar_mundo():
             chunks.append(Chunk((posX,posZ),atlas))
     
     for c in chunks:
-        for y in range(1):
+        for y in range(4):
             for z in range(Chunk.COUNT):
                 for x in range(Chunk.COUNT):
-                    c.blocks[y][z][x] = Block("grass", c)
+                    if y==0:
+                        c.blocks[y][z][x] = Block("bedrock", c)
+                    elif y==3:
+                        c.blocks[y][z][x] = Block("grass", c)
+                    elif y < 3:
+                        c.blocks[y][z][x] = Block("dirt", c)
                     manager.add_collider(colliders.AABB(f"{c.id[0]},{c.id[1]}|({x},{y},{z})", [0,0,0], [1,1,1]))
         
         #agregamos el chunk al grafo de escena
@@ -396,12 +467,7 @@ def generar_mundo():
                     gx = int(np.floor(global_pos[0]))
                     gz = int(np.floor(global_pos[2]))
                     spatial_grid[(gx,0,gz)] = manager[collider_name]
-
-if __name__ == "__main__":
-    #Crear la ventana
-    controller = Controller(800,600, "CraftMine")
-    controller.set_exclusive_mouse(controller.mouseLocked)
-
+    #===================================================================================================
     #Contador de FPS para el Debug. Sacado de Aux10 del repo de auxiliares del curso
     fps_label = text.Label(
         text="FPS: 0.00",
@@ -425,35 +491,7 @@ if __name__ == "__main__":
         anchor_y="top",
         color=(255,255,255,255)
     )
-
-    vel_label = text.Label(
-        text="Velocity: 0.00, 0.00, 0.00",
-        font_name="Arial",
-        font_size=12,
-        x=10,
-        y=controller.height - 30,
-        anchor_x="left",
-        anchor_y="top",
-        color=(255,255,255,255)
-    )
-
-    game_shaders = os.path.join(os.path.dirname(__file__), "game_shaders")
-    pipeline = init_pipeline(game_shaders + "/blinn_phong.vert", game_shaders + "/blinn_phong.frag")
-
-    assets_folder = os.path.join(os.path.dirname(__file__), "assets")
-    atlas = Texture(assets_folder + "/atlas.png", minFilterMode=GL_NEAREST, maxFilterMode=GL_NEAREST)
-
-    player = Player([0,20,0], speed=5)
-
-    world = SceneGraph(player)
-
-    #Inicializacion del manager de colisiones, y se registra la colision del jugador
-    manager = colliders.CollisionManager()
-    manager.add_collider(player.collider)
-
-    generar_mundo()
-
-    world.add_node("sun", light=DirectionalLight(ambient=[0.4,0.4,0.4]), pipeline=pipeline, rotation=[-np.pi/4, -np.pi/4, 0])
+    #================================================== EVENTOS =================================================================================
 
     @controller.event
     def on_draw():
@@ -461,6 +499,16 @@ if __name__ == "__main__":
 
         glClearColor(*controller.skyColor,1)
         glEnable(GL_DEPTH_TEST)
+        
+        glEnable(GL_BLEND)
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+        
+        #dibujamos el skybox antes que el mundo para que de la ilusion de que efectivamente es infinitamente mas lejano que el mundo
+        #importante desactivar el depth mask, de lo contrario el efecto no se logra :P
+        glDepthMask(GL_FALSE)
+        sky_pipeline["daytime"] = controller.daytime
+        skybox.draw()
+        glDepthMask(GL_TRUE)
 
         if controller.wireframe:
             glPolygonMode(GL_FRONT_AND_BACK, GL_LINE)
@@ -475,7 +523,6 @@ if __name__ == "__main__":
         if controller.debug:
             fps_label.draw()
             pos_label.draw()
-            #vel_label.draw()
     
     @controller.event
     def on_key_press(symbol, modifiers):
@@ -491,6 +538,9 @@ if __name__ == "__main__":
         if symbol == key.F5:
             #Activa/desactiva el Wireframe
             controller.wireframe = not controller.wireframe
+
+        if symbol == key.T:
+            controller.daytime += 0.1
 
         #Movimiento
         if symbol == key.W:
@@ -524,12 +574,51 @@ if __name__ == "__main__":
         player.pitch = math.clamp(player.pitch, -(np.pi / 2 - 0.01), np.pi / 2 - 0.01)
 
     def update(dt):
+        controller.time += dt
+        controller.daytime += dt/60
+        if controller.daytime >= 2:
+            controller.daytime = 0
+
+        dtime = controller.daytime
+        if dtime >= 0 and dtime < 0.25:
+            t = dtime/0.25 #t=0 cuando dtime es 0 (amanecer). t=1 cuando dtime es 0.25 (deja de amanecer)
+            #transicionar de amanecer a dia:
+            controller.skyColor = controller.sunsetColor*(1-t) + controller.dayColor*t
+            controller.lightColor = controller.sunsetLightColor*(1-t) + controller.dayLightColor*t
+        elif dtime >= 0.75 and dtime < 1:
+            t = (dtime-0.75)/0.25
+            controller.skyColor = controller.dayColor*(1-t) + controller.sunsetColor*t
+            controller.lightColor = controller.dayLightColor*(1-t) + controller.sunsetLightColor*t
+        elif dtime >= 1 and dtime < 1.2:
+            t = (dtime-1)/0.2
+            controller.skyColor = controller.sunsetColor*(1-t) + controller.nightColor*t
+            controller.lightColor = controller.sunsetLightColor*(1-t) + controller.nightLightColor*t
+        elif dtime >= 1.8 and dtime < 2:
+            t = (dtime-1.8) / 0.2
+            controller.skyColor = controller.nightColor*(1-t) + controller.sunsetColor*t
+            controller.lightColor = controller.sunsetLightColor*(1-t) + controller.nightLightColor*t
+        elif dtime >= 0.25 and dtime < 0.75:
+            #si o si es de dia
+            controller.skyColor = controller.dayColor
+        elif dtime >= 1.2 and dtime < 1.8:
+            #si o si es de noche
+            controller.skyColor = controller.nightColor
+    
         world.update()
+
+        if player.p_pos[1] < -20:
+            print("s")
+            player.reset_player()
+        
         player.player_update(dt)
 
-        check_collisions(player, manager)
+        skybox["sun_obj"]["transform"] = tr.translate(player.position[0], player.position[1], player.position[2]) @ tr.rotationZ(np.pi*controller.daytime) @ tr.translate(3,0,0) @ tr.rotationY(-np.pi/2)
+        skybox["sun_light"]["rotation"] = [-np.pi*controller.daytime,np.pi/2,0]
+        skybox["sun_light"]["light"] = DirectionalLight(ambient=[0.4,0.4,0.4], diffuse=controller.lightColor, specular=controller.lightColor)
+        skybox["moon_obj"]["transform"] = tr.translate(player.position[0], player.position[1], player.position[2]) @ tr.rotationZ(np.pi + np.pi*controller.daytime) @ tr.translate(3,0,0) @ tr.rotationY(-np.pi/2)
+        skybox.update()
 
-        controller.time += dt
+        check_collisions(player, manager)
 
         if controller.debug:
             fps = 1/dt if dt>0 else 0
@@ -537,9 +626,6 @@ if __name__ == "__main__":
 
             pos = player.p_pos
             pos_label.text = f"Position: {pos[0]:.1f}, {pos[1]:.1f}, {pos[2]:.1f}"
-
-            vel = player.velocity
-            vel_label.text = f"Velocity: {vel[0]:.1f}, {vel[1]:.1f}, {vel[2]:.1f}"
 
     clock.schedule_interval(update, 1/600)
     run()
