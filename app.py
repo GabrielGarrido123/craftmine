@@ -12,7 +12,6 @@ import trimesh as tm
 
 #Librerias Oficiales de Python
 import sys, os
-import math as mathPY
 
 #Codigos del curso CC3501
 from utils.helpers import init_pipeline, mesh_from_file, init_axis
@@ -337,33 +336,6 @@ class Chunk(Model):
 
 #Global requerido
 spatial_grid = {}
-
-#Funcion responsable de revisar las colisiones del jugador
-def check_collisions_old(player, man):
-    px, _, pz = player.position
-
-    center_x = int(np.floor(px))
-    center_z = int(np.floor(pz))
-
-    candidates = []
-    
-    #se consulta un vecindario cerrado de 3x3 bloques en el suelo horizontal y=0
-    for dx in range(center_x - 1, center_x + 2):
-        for dz in range(center_z - 1, center_z + 2):
-            grid_key = (dx, 0, dz)
-            if grid_key in spatial_grid:
-                candidates.append(spatial_grid[grid_key])
-    
-    #Fase Narrow
-    collisions = []
-    for collider in candidates:
-        if collider.detect_collision(player.collider):
-            collisions.append(collider)
-    
-    if not collisions:
-        return
-
-    player.player_collisions(collisions)
 
 def check_collisions(player, man):
     collisions = manager.check_collision("player")
